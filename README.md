@@ -2,7 +2,7 @@
 
 ## WARNING!! this is just a concept
 
-Carrot is must be a database, relation nosql native database for **Go**, maybe it will be generic... 
+Carrot is must be a database, relational nosql native database for **Go**, maybe it will be generic... 
 
 Carrot is very very fast, faster than light! Seriously! 
 
@@ -16,20 +16,20 @@ Carrot is very very fast, faster than light! Seriously!
 
 Database table is a just struct.
 
-Generate code package for each struct(table), with predefined logic(write, read, search,et.c) and optimal conversation various types of data to bytes.
+Code package is generated for each struct(table), with predefined logic(write, read, search,et.c) and optimal conversation various types of data to bytes.
 
 It should be easy to use during software development.
 
-Structs is convenient, and why not store structs in database?
+Structs are convenient, and why not to store structs in database?
 
 Why generic? - otherwise it will input interface{}, parse it with reflect... - it is very slow! 
 
 ## Structure
 
-For each struct(table) create own directory
+For each struct(table) it creates own directory
 
-For each field create own file
+For each field it creates own file
 
-For each item in table has id and information for read it from disk, ex: {id, Field0{offset,length}, Field1{offset,length}}, this allows quick read item from disk
+There is an id and information for reading it from disk for each item in table, ex: {id, Field0{offset,length}, Field1{offset,length}}, this allows quick read item from disk
 
-Carrot is not only disk based database, it is also may store data in memory(cache). When reading, if item not found in cache, read it from disk, and then store to cache ^^
+Carrot is not only a disk based database, it is also may store data in memory(cache). When reading, if item not found in cache, read it from disk, and then store to cache ^^
