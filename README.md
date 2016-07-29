@@ -30,6 +30,6 @@ For each struct(table) it creates own directory
 
 For each field it creates own file
 
-There is an id and information for reading it from disk for each item in table, ex: {id, Field0{offset,length}, Field1{offset,length}}, this allows quick read item from disk
+There is an id and information for reading it from disk for each item in table, ex: `{id, Field0{offset,length}, Field1{offset,length}}`, this allows quick read item from disk
 
 Carrot is not only a disk based database, it is also may store data in memory(cache). When reading, if item not found in cache, read it from disk, and then store to cache ^^
