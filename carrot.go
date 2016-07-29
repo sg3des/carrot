@@ -3,37 +3,18 @@ package carrot
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"log"
 	"os"
+	"path"
 	"time"
 )
 
-type Users struct {
-	id  int
-	err error
-
-	Name string
-	IP   int
-}
-
-var (
-	writeUsers     []*Users
-	writeUsersLock bool
-
-	indexFile    *os.File
-	indexLineLen = 24
-
-	usersNameOffset int64
-	usersName       *os.File
-
-	usersIPOffset int64
-	usersIP       *os.File
-)
-
 type Info struct {
-	ID   int
-	Name Offset
-	IP   Offset
+	ID     int
+	Name   Offset
+	Number Offset
 }
 
 type Offset struct {
@@ -41,191 +22,265 @@ type Offset struct {
 	Len int
 }
 
-func Open() {
-	var err error
-	usersName, err = os.OpenFile("./db/users/name", os.O_CREATE|os.O_RDWR, 0755)
+type usersInfo struct {
+	write     []*Users
+	writeLock bool
+
+	indexFile *os.File
+	indexLen  int
+
+	index *indexMap
+	cache *usersMap
+
+	lastid int
+
+	fields usersfields
+}
+
+type usersfields struct {
+	Name       *os.File
+	NameOffset int64
+
+	Number       *os.File
+	NumberOffset int64
+}
+
+type Users struct {
+	ID      int
+	Written bool
+	Err     error
+
+	Name   string
+	Number int
+}
+
+var (
+	users = usersInfo{
+		indexLen: 25,
+		index:    &indexMap{Items: make(map[int]Info)},
+		cache:    &usersMap{Items: make(map[int]*Users)},
+	}
+)
+
+func Open(openpath string) error {
+	// users
+	err := os.MkdirAll(path.Join(openpath, "users"), 0755)
 	if err != nil {
-		log.Fatalln(err)
+		return nil
 	}
 
-	usersIP, err = os.OpenFile("./db/users/ip", os.O_CREATE|os.O_RDWR, 0755)
+	users.fields.Name, err = os.OpenFile(path.Join(openpath, "users", "name"), os.O_CREATE|os.O_RDWR, 0755)
 	if err != nil {
-		log.Fatalln(err)
+		return nil
 	}
 
-	indexFile, err = os.OpenFile("./db/users/index", os.O_CREATE|os.O_RDWR, 0755)
+	users.fields.Number, err = os.OpenFile(path.Join(openpath, "users", "number"), os.O_CREATE|os.O_RDWR, 0755)
 	if err != nil {
-		log.Fatalln(err)
+		return nil
+	}
+
+	users.indexFile, err = os.OpenFile(path.Join(openpath, "users", "index"), os.O_CREATE|os.O_RDWR, 0755)
+	if err != nil {
+		return nil
 	}
 
 	parseIndex()
-
 	go keeper()
+
+	return nil
+}
+
+func Close() {
+	for {
+		if len(users.write) == 0 {
+			break
+		}
+	}
+
+	users.fields.Name.Close()
+	users.fields.Number.Close()
+	users.indexFile.Close()
 }
 
 func parseIndex() {
-	indexitem := make([]byte, indexLineLen)
+	indexitem := make([]byte, users.indexLen)
 	var n int
 	var err error
 	for err == nil {
-		n, err = indexFile.Read(indexitem)
+		n, err = users.indexFile.Read(indexitem)
 		if n == 0 {
 			continue
 		}
-		if n != indexLineLen || len(indexitem) != indexLineLen {
-			log.Println("WTF?", len(indexitem), n, indexLineLen)
+		if n != users.indexLen || len(indexitem) != users.indexLen {
+			log.Println("carrot: warning! failed parse index:", indexitem)
 			continue
 		}
 
 		id := int(binary.LittleEndian.Uint32(indexitem[:4]))
 		nameOff := int64(binary.LittleEndian.Uint64(indexitem[4:12]))
 		nameLen := int(binary.LittleEndian.Uint16(indexitem[12:14]))
-		ipOff := int64(binary.LittleEndian.Uint64(indexitem[14:22]))
-		ipLen := int(binary.LittleEndian.Uint16(indexitem[22:24]))
+		numberOff := int64(binary.LittleEndian.Uint64(indexitem[14:22]))
+		numberLen := int(binary.LittleEndian.Uint16(indexitem[22:24]))
 
-		if Summ := nameOff + int64(nameLen); Summ > usersNameOffset {
-			usersNameOffset = Summ
+		if Summ := nameOff + int64(nameLen); Summ > users.fields.NameOffset {
+			users.fields.NameOffset = Summ
 		}
-		if Summ := ipOff + int64(ipLen); Summ > usersIPOffset {
-			usersIPOffset = Summ
+		if Summ := numberOff + int64(numberLen); Summ > users.fields.NumberOffset {
+			users.fields.NumberOffset = Summ
+		}
+		if id > users.lastid {
+			users.lastid = id
 		}
 
-		index.Set(id, Info{ID: id, Name: Offset{nameOff, nameLen}, IP: Offset{ipOff, ipLen}})
+		users.index.Set(id, Info{ID: id, Name: Offset{nameOff, nameLen}, Number: Offset{numberOff, numberLen}})
 	}
 
-	usersName.Seek(usersNameOffset, 0)
-	usersIP.Seek(usersIPOffset, 0)
+	users.fields.Name.Seek(users.fields.NameOffset, 0)
+	users.fields.Number.Seek(users.fields.NumberOffset, 0)
 }
 
-func (u *Users) Write(id int) {
-	u.id = id
-	writeUsersLock = true
-	writeUsers = append(writeUsers, u)
-	// writeUsers.Set(id, u)
-	cacheUsers.Set(id, u)
-	writeUsersLock = false
+func (u *Users) Write() {
+	if u.ID == 0 {
+		users.lastid++
+		u.ID = users.lastid
+	}
+	id := u.ID
+	users.writeLock = true
+	users.write = append(users.write, u)
+	users.cache.Set(id, u)
+	users.writeLock = false
 }
 
 func keeper() {
+	var reset bool
 	for {
 		time.Sleep(time.Second)
-		var reset bool
-		for _, u := range writeUsers {
+		reset = false
+		for id, u := range users.write {
 			if u != nil {
 				if err := u.write(); err != nil {
 					log.Println("carrot: failed write data, reason:", err)
 				}
+				users.cache.Set(u.ID, u)
 				// log.Println("for write", u, writeUsersLock)
-				u = nil
+				users.write[id] = nil
 			}
-			if !writeUsersLock {
+			if !users.writeLock {
 				reset = true
 			}
 		}
-		if reset {
-			writeUsers = []*Users{}
+
+		//fully clean writeUsers
+		if reset && !users.writeLock {
+			users.write = []*Users{}
 		}
-		// writeUsers.Lock()
-		// for id, u := range writeUsers.items {
-		// 	if err := u.write(); err != nil {
-		// 		log.Println("failed write")
-		// 		continue
-		// 	}
-		// 	delete(writeUsers.items, id)
-		// }
-		// writeUsers.Unlock()
 	}
 }
 
-func (u *Users) nameBytes() []byte {
-	return []byte(u.Name)
+func sMarshal(v string) []byte {
+	return []byte(v)
 }
 
-func (u *Users) ipBytes() []byte {
+func sUnmarshal(v []byte) string {
+	return string(v)
+}
+
+func iMarshal(v int) []byte {
 	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, uint64(u.IP))
+	binary.LittleEndian.PutUint64(b, uint64(v))
 	return b
 }
 
+func iUnmarshal(v []byte) int {
+	return int(binary.LittleEndian.Uint64(v))
+}
+
+//write data to disk
 func (u *Users) write() error {
 	// log.Println("write")
-	nameOff, _ := usersName.Seek(0, 1)
-	nameLen, err := usersName.Write(u.nameBytes())
+	NameOff, _ := users.fields.Name.Seek(0, 1)
+	NameLen, err := users.fields.Name.Write(sMarshal(u.Name))
 	if err != nil {
 		log.Println("failed write user")
-		u.err = err
+		u.Err = err
 	}
 
-	ipOff, _ := usersIP.Seek(0, 1)
-	ipLen, err := usersIP.Write(u.ipBytes())
+	NumberOff, _ := users.fields.Number.Seek(0, 1)
+	NumberLen, err := users.fields.Number.Write(iMarshal(u.Number))
 	if err != nil {
-		log.Println("failed write ip")
-		u.err = err
+		log.Println("failed write number")
+		u.Err = err
 	}
 
-	index.Set(u.id, Info{ID: u.id, Name: Offset{nameOff, nameLen}, IP: Offset{ipOff, ipLen}})
+	users.index.Set(u.ID, Info{ID: u.ID, Name: Offset{NameOff, NameLen}, Number: Offset{NumberOff, NumberLen}})
 
-	bid := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bid, uint32(u.id))
+	bID := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bID, uint32(u.ID))
 
-	bnameOff := make([]byte, 8)
-	binary.LittleEndian.PutUint64(bnameOff, uint64(nameOff))
+	bNameOff := make([]byte, 8)
+	binary.LittleEndian.PutUint64(bNameOff, uint64(NameOff))
 
-	bnameLen := make([]byte, 2)
-	binary.LittleEndian.PutUint16(bnameLen, uint16(nameLen))
+	bNameLen := make([]byte, 2)
+	binary.LittleEndian.PutUint16(bNameLen, uint16(NameLen))
 
-	bipOff := make([]byte, 8)
-	binary.LittleEndian.PutUint64(bipOff, uint64(ipOff))
+	bNumberOff := make([]byte, 8)
+	binary.LittleEndian.PutUint64(bNumberOff, uint64(NumberOff))
 
-	bipLen := make([]byte, 2)
-	binary.LittleEndian.PutUint16(bipLen, uint16(ipLen))
+	bNumberLen := make([]byte, 2)
+	binary.LittleEndian.PutUint16(bNumberLen, uint16(NumberLen))
 
 	buf := bytes.NewBuffer([]byte{})
-	buf.Write(bid)
-	buf.Write(bnameOff)
-	buf.Write(bnameLen)
-	buf.Write(bipOff)
-	buf.Write(bipLen)
+	buf.Write(bID)
+	buf.Write(bNameOff)
+	buf.Write(bNameLen)
+	buf.Write(bNumberOff)
+	buf.Write(bNumberLen)
+	buf.Write(make([]byte, 1))
 
-	_, err = buf.WriteTo(indexFile)
+	_, err = buf.WriteTo(users.indexFile)
 	if err != nil {
 		return err
 	}
 
-	usersNameOffset = nameOff + int64(nameLen)
-	usersIPOffset = ipOff + int64(ipLen)
+	u.Written = true
+
+	users.fields.NameOffset = NameOff + int64(NameLen)
+	users.fields.NumberOffset = NumberOff + int64(NumberLen)
 
 	return nil
 }
 
-func Read(id int) *Users {
-	item, ok := cacheUsers.Get(id)
+func (u *Users) Read(id int) error {
+	if u == nil {
+		u = new(Users)
+	}
+
+	item, ok := users.cache.Get(id)
 	if ok {
-		return item
+		*u = *item
+		return nil
 	}
 	// log.Println("return from disk")
 
-	info, ok := index.Get(id)
+	info, ok := users.index.Get(id)
 	if !ok {
-		return nil
+		return errors.New(fmt.Sprintf("item by id %d not found", id))
 	}
 
-	var u = new(Users)
+	var bName = make([]byte, info.Name.Len)
+	users.fields.Name.ReadAt(bName, info.Name.Off)
+	u.Name = sUnmarshal(bName)
 
-	var nameBytes = make([]byte, info.Name.Len)
-	usersName.ReadAt(nameBytes, info.Name.Off)
-	u.Name = string(nameBytes)
+	var bNumber = make([]byte, info.Number.Len)
+	users.fields.Number.ReadAt(bNumber, info.Number.Off)
+	// _number, _ := binary.ReadVarint(bytes.NewReader(numberBytes))
+	// u.Number = int(_number)
+	u.Number = iUnmarshal(bNumber)
 
-	var ipBytes = make([]byte, info.IP.Len)
-	usersIP.ReadAt(ipBytes, info.IP.Off)
-	_ip, _ := binary.ReadVarint(bytes.NewReader(ipBytes))
-	u.IP = int(_ip)
-
-	cacheUsers.Set(id, u)
-
-	return u
+	users.cache.Set(id, u)
+	return nil
 }
 
-func ClearCache() {
-	cacheUsers.Truncate()
+func (u *Users) ClearCache() {
+	users.cache.Truncate()
 }

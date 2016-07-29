@@ -6,26 +6,34 @@ import (
 	"time"
 )
 
+var item *Users
+
 func init() {
 	log.SetFlags(log.Lshortfile)
-	Open()
+	Open("db")
 }
 
 func BenchmarkWrite(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		var u = &Users{Name: "name2", IP: 123837}
-		u.Write(i)
+		var u = &Users{Name: "name2", Number: i}
+		u.Write()
 	}
 
 }
 
 func BenchmarkPause(b *testing.B) {
-	b.Log("some pause, as Go not safety for concurrent write and read, and it`s very BAD! but ")
-	time.Sleep(20 * time.Second)
+	time.Sleep(15 * time.Second)
+	item.ClearCache()
 }
 
-func BenchmarkRead(b *testing.B) {
+func BenchmarkReadFromDisk(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		Read(i)
+		item.Read(i)
+	}
+}
+
+func BenchmarkReadFromCache(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		item.Read(1)
 	}
 }
