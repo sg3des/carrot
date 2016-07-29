@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-var item *Users
+var item = &Users{}
 
 func init() {
 	log.SetFlags(log.Lshortfile)

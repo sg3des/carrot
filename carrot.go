@@ -197,7 +197,6 @@ func iUnmarshal(v []byte) int {
 
 //write data to disk
 func (u *Users) write() error {
-	// log.Println("write")
 	NameOff, _ := users.fields.Name.Seek(0, 1)
 	NameLen, err := users.fields.Name.Write(sMarshal(u.Name))
 	if err != nil {
@@ -260,7 +259,6 @@ func (u *Users) Read(id int) error {
 		*u = *item
 		return nil
 	}
-	// log.Println("return from disk")
 
 	info, ok := users.index.Get(id)
 	if !ok {
@@ -273,8 +271,6 @@ func (u *Users) Read(id int) error {
 
 	var bNumber = make([]byte, info.Number.Len)
 	users.fields.Number.ReadAt(bNumber, info.Number.Off)
-	// _number, _ := binary.ReadVarint(bytes.NewReader(numberBytes))
-	// u.Number = int(_number)
 	u.Number = iUnmarshal(bNumber)
 
 	users.cache.Set(id, u)
