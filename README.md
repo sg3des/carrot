@@ -7,8 +7,9 @@ Carrot is must be a database, relation nosql native database for **Go**, maybe i
 Carrot is very very fast, faster than light! Seriously! 
 
 	BenchmarkWrite-8        	 5000000	       374 ns/op	     165 B/op	       1 allocs/op
-	BenchmarkReadFromDisk-8 	 1000000	      1039 ns/op	     171 B/op	       4 allocs/op
-	BenchmarkReadFromCache-8	20000000	      92.4 ns/op	      64 B/op	       1 allocs/op
+	BenchmarkReadFromDisk-8 	 2000000	       516 ns/op	      54 B/op	       1 allocs/op
+	BenchmarkReadFromCache-8	50000000	       32.4 ns/op	       0 B/op	       0 allocs/op
+
 
 
 ## IDEA
