@@ -1,6 +1,6 @@
 # CARROT  
 
-## WARNING!! this is just a concept**
+## WARNING!! this is just a concept
 
 Carrot is must be a database, relation nosql native database for **Go**, maybe it will be generic... 
 
